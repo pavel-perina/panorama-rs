@@ -10,6 +10,15 @@ extern crate lodepng;
 // https://users.rust-lang.org/t/reading-an-array-of-ints-from-a-file-solved/16530/10
 // https://www.secondstate.io/articles/use-binary-data-as-function-input-and-output/
 // why 16bit image does not work, grrr  https://github.com/kornelski/lodepng-rust/issues/26
+
+
+/******************************************************************
+  ____            _   _ _   _ _
+ / ___| ___  ___ | | | | |_(_) |___
+| |  _ / _ \/ _ \| | | | __| | / __|
+| |_| |  __/ (_) | |_| | |_| | \__ \
+ \____|\___|\___/ \___/ \__|_|_|___/
+******************************************************************/
 pub struct PositionLLE {
     lat: f64, // latitude  | phi   | +north/-south of equator
     lon: f64, // longitude | lamda | +east/-west of Greenwich
@@ -40,9 +49,9 @@ impl Sphere {
 struct Spheroid {
     a: f64,
     b: f64,
-    f:f64,
-    e:f64,
-    e_sq:f64
+    f: f64,
+    e: f64,
+    e_sq: f64
 }
 
 
@@ -80,6 +89,15 @@ impl Sphere {
     }
 }
 
+/******************************************************************
+ _   _      _       _     _   __  __
+| | | | ___(_) __ _| |__ | |_|  \/  | __ _ _ __
+| |_| |/ _ \ |/ _` | '_ \| __| |\/| |/ _` | '_ \
+|  _  |  __/ | (_| | | | | |_| |  | | (_| | |_) |
+|_| |_|\___|_|\__, |_| |_|\__|_|  |_|\__,_| .__/
+              |___/                       |_|
+******************************************************************/
+
 fn read_tile(lat:i32, lon:i32) ->  Vec<u16>
 {
     use std::fs::File;
@@ -89,7 +107,7 @@ fn read_tile(lat:i32, lon:i32) ->  Vec<u16>
 
     let array_size = 1201 * 1201;
     let file_name = format!("d:/_disk_d_old/devel-python/panorama/data_srtm/N{:02}E{:03}.hgt", lat, lon);
-    println!("Reading {}", file_name);
+    //println!("Reading {}", file_name);
     let mut buffer: Vec<u16> = Vec::with_capacity(1201*1201);
     let file = File::open(file_name).expect("Failed to open file!");
     let mut reader = BufReader::new(file);
@@ -100,11 +118,49 @@ fn read_tile(lat:i32, lon:i32) ->  Vec<u16>
     //println!("buf[0]={}", buffer[0]);    
     //lodepng::encode_file("test.png", buffer.as_slice(), 1201, 1201, lodepng::ColorType::LCT_GREY, 16);
     return buffer;
-
 }
 
+struct LatLonRange {
+    min_lat:i32,
+    min_lon:i32,
+    max_lat:i32,
+    max_lon:i32
+}
+
+fn load_data(range:LatLonRange) {
+    let n_tiles_horiz = range.max_lon - range.min_lon + 1;
+    let n_tiles_vert  = range.max_lat - range.min_lat + 1;
+    let n_tiles_total = n_tiles_horiz * n_tiles_vert;
+    let data_width    = n_tiles_horiz * 1200 + 1;
+    let data_height   = n_tiles_vert  * 1200 + 1;
+
+    println!("Requesting data for area {}°N {}°E - {}°N {}°E ... (aprox. {:3.0}x{:3.0} km).",
+        range.min_lat, range.min_lon,
+        range.max_lat, range.max_lon,
+        (n_tiles_horiz as f64) * 111.1 * (range.min_lat as f64).to_radians().cos(),
+        (n_tiles_vert  as f64) * 111.1
+        );
+
+    println!("I will read {}x{}={} tiles, heightmap size is {}x{} ({} MB).",
+        n_tiles_horiz, n_tiles_vert, n_tiles_total,
+        data_width, data_height, data_width*data_height*2/1000000
+        );
+
+    let array_size = (data_width * data_height) as usize;
+    let mut buffer: Vec<u16> = Vec::with_capacity(array_size);
+    unsafe { buffer.set_len(array_size); }
+}
+
+/******************************************************************
+__  __       _
+|  \/  | __ _(_)_ __
+| |\/| |/ _` | | '_ \
+| |  | | (_| | | | | |
+|_|  |_|\__,_|_|_| |_|
+******************************************************************/
+
 fn main() {
-    println!("Hello, world!");
+    let range = LatLonRange{min_lat: 47, min_lon: 15, max_lat: 50, max_lon: 21};
 
     let spheroid = Sphere::new();
     //let earth_model:Box<dyn EarthModel> = Box::new(Sphere::new());
@@ -114,5 +170,7 @@ fn main() {
     let lle = spheroid.xyz_to_lle(xyz);
     println!(" lle = {}, {}, {}", lle.lat, lle.lon, lle.ele);
 
-    read_tile(49, 16);
+    //read_tile(49, 16);
+    load_data(range);
+
 }
