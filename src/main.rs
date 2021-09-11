@@ -19,8 +19,8 @@ pub struct PositionXYZ {
 }
 
 trait EarthModel {
-    fn lle_to_xyz(&self, lle:PositionLLE) -> &PositionXYZ;
-    fn xyz_to_lle(&self, xyz:PositionXYZ) -> &PositionLLE;
+    fn lle_to_xyz(&self, lle:PositionLLE) -> PositionXYZ;
+    fn xyz_to_lle(&self, xyz:PositionXYZ) -> PositionLLE;
 }
 
 struct Sphere {
@@ -41,14 +41,14 @@ struct Spheroid {
     e_sq:f64
 }
 
-//impl EarthModel for Sphere {
-//    fn lle_to_xyz(&self, lle:PositionLLE) -> PositionXYZ {
-//        return PositionXYZ{x: 0.0, y:0.0, z:0.0};
-//    }
-//    fn xyz_to_lle(&self, xyz:PositionXYZ)  -> PositionLLE {
-//        return PositionLLE{lat: 0.0, lon:0.0, ele:0.0};
-//    }
-//}
+impl EarthModel for Sphere {
+    fn lle_to_xyz(&self, lle:PositionLLE) -> PositionXYZ {
+        return PositionXYZ{x: 0.0, y:0.0, z:0.0};
+    }
+    fn xyz_to_lle(&self, xyz:PositionXYZ)  -> PositionLLE {
+        return PositionLLE{lat: 0.0, lon:0.0, ele:0.0};
+    }
+}
 
 
 fn main() {
@@ -56,8 +56,9 @@ fn main() {
 
     let spheroid = Sphere::new();
     //let earth_model:Box<dyn EarthModel> = Box::new(Sphere::new());
-
-    //spheroid.
+    println!("Earth diameter is {} meters", spheroid.r);
+    let xyz = spheroid.lle_to_xyz(PositionLLE{lat: 49.0, lon: 16.0, ele:0.0});
+    println!(" xyz = {}, {}, {}", xyz.x, xyz.y, xyz.z)
 
 
 }
