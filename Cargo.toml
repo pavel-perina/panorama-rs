@@ -7,3 +7,5 @@ edition = "2018"
 
 [dependencies]
 byteorder="1"
+#image = "0.23.14"
+lodepng="1"

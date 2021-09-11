@@ -1,14 +1,15 @@
-//use std::path::Path;
 extern crate byteorder;
-
+//extern crate image;
+extern crate lodepng;
 // Naming conventions:                  https://doc.rust-lang.org/1.0.0/style/style/naming/README.html
 // Inheritance (traits):                https://riptutorial.com/rust/example/22917/inheritance-with-traits
 // Defining and Instantiating Structs:  https://doc.rust-lang.org/book/ch05-01-defining-structs.html
 // Constructor (there are none):        https://doc.rust-lang.org/nomicon/constructors.html
 //                                      https://subscription.packtpub.com/book/application_development/9781788623926/1/ch01lvl1sec16/using-the-constructor-pattern
 // https://docs.rs/nav-types/0.1.0/nav_types/index.html
-
-
+// https://users.rust-lang.org/t/reading-an-array-of-ints-from-a-file-solved/16530/10
+// https://www.secondstate.io/articles/use-binary-data-as-function-input-and-output/
+// why 16bit image does not work, grrr  https://github.com/kornelski/lodepng-rust/issues/26
 pub struct PositionLLE {
     lat: f64, // latitude  | phi   | +north/-south of equator
     lon: f64, // longitude | lamda | +east/-west of Greenwich
@@ -79,23 +80,26 @@ impl Sphere {
     }
 }
 
-fn read_tile()
+fn read_tile(lat:i32, lon:i32) ->  Vec<u16>
 {
     use std::fs::File;
     use std::io::BufReader;
     use byteorder::{BigEndian, ReadBytesExt};
+    //use std::fmt;
 
-    //let mut buffer = [0u16; 1201*1201];
     let array_size = 1201 * 1201;
-    let file_name = "d:/_disk_d_old/devel-python/panorama/data_srtm/N49E016.hgt";
+    let file_name = format!("d:/_disk_d_old/devel-python/panorama/data_srtm/N{:02}E{:03}.hgt", lat, lon);
+    println!("Reading {}", file_name);
     let mut buffer: Vec<u16> = Vec::with_capacity(1201*1201);
     let file = File::open(file_name).expect("Failed to open file!");
     let mut reader = BufReader::new(file);
     unsafe { buffer.set_len(array_size); }
+    // TODO: clamp data, convert whatever is greater than for example 10K to zero (input data are signed)
     reader.read_u16_into::<BigEndian>(&mut buffer[..]).expect("Failed to read file!");
-    println!("buf size = {}", buffer.len());
-    println!("buf[0]={}", buffer[0]);
-
+    //println!("buf size = {}", buffer.len());
+    //println!("buf[0]={}", buffer[0]);    
+    //lodepng::encode_file("test.png", buffer.as_slice(), 1201, 1201, lodepng::ColorType::LCT_GREY, 16);
+    return buffer;
 
 }
 
@@ -110,5 +114,5 @@ fn main() {
     let lle = spheroid.xyz_to_lle(xyz);
     println!(" lle = {}, {}, {}", lle.lat, lle.lon, lle.ele);
 
-    read_tile();
+    read_tile(49, 16);
 }
