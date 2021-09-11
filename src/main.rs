@@ -129,14 +129,14 @@ struct LatLonRange {
     tiles_vert:usize,
     data_width:usize,
     data_height:usize,
-    pixels_per_deg:usize
+    pixels_per_deg:f64
 }
 
 impl LatLonRange {
     fn new(min_lat:i32, min_lon:i32, max_lat:i32, max_lon:i32) -> Self {
         let tiles_horiz:usize    = (max_lon - min_lon + 1) as usize;
         let tiles_vert:usize     = (max_lat - min_lat + 1) as usize;
-        let pixels_per_deg:usize = 1200;
+        let pixels_per_deg:f64   = 1200.0;
         let data_width:usize     = tiles_horiz * 1200 + 1;
         let data_height:usize    = tiles_vert * 1200 + 1;
         return LatLonRange{min_lat, min_lon, max_lat, max_lon, 
@@ -148,10 +148,11 @@ impl LatLonRange {
         self.tiles_horiz * self.tiles_vert
     }
     fn lat_lon_to_index(&self, lat:f64, lon:f64) -> usize {
-        let x:f64 = ((((self.max_lat+1) as f64) - lat) * 1200.0).max(0.0);
-        let y:f64 = (lon-(self.min_lon as f64) * 1200.0).max(0.0);
+        let y:f64 = ((((self.max_lat+1) as f64) - lat) * self.pixels_per_deg).max(0.0);
+        let x:f64 = ((lon-(self.min_lon as f64)) * self.pixels_per_deg).max(0.0);
         let c:usize = (x as usize).min(self.data_width);
         let r:usize = (y as usize).min(self.data_height);
+        //println!("x={} ({}), y={} ({}), offset={}", x,c,y,r,r*self.data_width +c);
         return r * self.data_width + c;
     }
     fn array_size(&self) -> usize {
@@ -160,7 +161,7 @@ impl LatLonRange {
 }
 
 
-fn load_data(range:LatLonRange) -> Vec<u16> 
+fn load_data(range:&LatLonRange) -> Vec<u16> 
 {
     println!("Requesting data for area {}°N {}°E - {}°N {}°E ... (aprox. {:3.0}x{:3.0} km).",
         range.min_lat, range.min_lon,
@@ -177,8 +178,10 @@ fn load_data(range:LatLonRange) -> Vec<u16>
     let mut buffer: Vec<u16> = Vec::with_capacity(range.array_size());
     unsafe { buffer.set_len(range.array_size()); }
 
+    //use rayon::prelude::*;
+
     let mut progress = 0;
-    for i in 0..range.tiles_total() {
+    (0..range.tiles_total()).into_iter().for_each(|i| {
         let lat = range.min_lat + ((i / range.tiles_horiz) as i32);
         let lon = range.min_lon + ((i % range.tiles_horiz) as i32);
         // Print progress
@@ -198,19 +201,21 @@ fn load_data(range:LatLonRange) -> Vec<u16>
                 buffer[offset + x] = tile[y * 1201 + x];
             }
         }
-    }
+    });
     return buffer;
     //lodepng::encode_file("test.png", buffer.as_slice(), 8401, 4801, lodepng::ColorType::LCT_GREY, 16);
 }
 
 
-fn get_height(range:LatLonRange, data:Vec<u16>, lat:f64, lon:f64) -> u16
+fn get_height(range:&LatLonRange, data:&Vec<u16>, lat:f64, lon:f64) -> u16
 {
     data[range.lat_lon_to_index(lat, lon)]
 }
 
+
+
 /******************************************************************
-__  __       _
+ __  __       _
 |  \/  | __ _(_)_ __
 | |\/| |/ _` | | '_ \
 | |  | | (_| | | | | |
@@ -230,6 +235,8 @@ fn main() {
     println!(" lle = {}, {}, {}", lle.lat, lle.lon, lle.ele);
     */
     //read_tile(49, 16);
-    load_data(range);
+    let data = load_data(&range);
+    let elevation =get_height(&range, &data, eye.lat, eye.lon);
+    println!("Height at {}, {} is {}", eye.lat, eye.lon, elevation);
 
 }
