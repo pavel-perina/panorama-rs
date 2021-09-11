@@ -98,7 +98,7 @@ impl Sphere {
               |___/                       |_|
 ******************************************************************/
 
-fn read_tile(lat:i32, lon:i32) ->  Vec<u16>
+fn load_tile(lat:i32, lon:i32) ->  Vec<u16>
 {
     use std::fs::File;
     use std::io::BufReader;
@@ -127,12 +127,13 @@ struct LatLonRange {
     max_lon:i32
 }
 
-fn load_data(range:LatLonRange) {
-    let n_tiles_horiz = range.max_lon - range.min_lon + 1;
-    let n_tiles_vert  = range.max_lat - range.min_lat + 1;
+fn load_data(range:LatLonRange) -> Vec<u16> {
+    let n_tiles_horiz: usize = (range.max_lon - range.min_lon + 1) as usize;
+    let n_tiles_vert: usize  = (range.max_lat - range.min_lat + 1) as usize;
     let n_tiles_total = n_tiles_horiz * n_tiles_vert;
     let data_width    = n_tiles_horiz * 1200 + 1;
     let data_height   = n_tiles_vert  * 1200 + 1;
+    let array_size    = data_width * data_height;
 
     println!("Requesting data for area {}°N {}°E - {}°N {}°E ... (aprox. {:3.0}x{:3.0} km).",
         range.min_lat, range.min_lon,
@@ -143,12 +144,36 @@ fn load_data(range:LatLonRange) {
 
     println!("I will read {}x{}={} tiles, heightmap size is {}x{} ({} MB).",
         n_tiles_horiz, n_tiles_vert, n_tiles_total,
-        data_width, data_height, data_width*data_height*2/1000000
+        data_width, data_height, array_size*2/1000000
         );
 
-    let array_size = (data_width * data_height) as usize;
+
     let mut buffer: Vec<u16> = Vec::with_capacity(array_size);
     unsafe { buffer.set_len(array_size); }
+
+    let mut progress = 0;
+    for i in 0..n_tiles_total {
+        let lat = range.min_lat + ((i / n_tiles_horiz) as i32);
+        let lon = range.min_lon + ((i % n_tiles_horiz) as i32);
+        // Print progress
+        progress += 1;
+        println!("Loading tile {:03}/{:03} lat={:02}, lon={:02}", progress, n_tiles_total, lat, lon);
+        // Load tile
+        let tile = load_tile(lat, lon);
+        // Move to data
+        let tile_y = (range.max_lat - lat) as usize;
+        let tile_x = (lon - range.min_lon) as usize;
+        for y in 0..=1200 {
+            let row = tile_y * 1200 + y;
+            let mut offset = (row * data_width) as usize;
+            offset += tile_x * 1200;
+            for x in 0..=1200 {
+                buffer[offset + x] = tile[y * 1201 + x];
+            }
+        }
+    }
+    return buffer;
+    //lodepng::encode_file("test.png", buffer.as_slice(), 8401, 4801, lodepng::ColorType::LCT_GREY, 16);
 }
 
 /******************************************************************
@@ -161,15 +186,16 @@ __  __       _
 
 fn main() {
     let range = LatLonRange{min_lat: 47, min_lon: 15, max_lat: 50, max_lon: 21};
-
-    let spheroid = Sphere::new();
+    let eye   = PositionLLE{lat: 50.08309, lon: 17.23094, ele:1510.0};
+    let spheroid  = Sphere::new();    
     //let earth_model:Box<dyn EarthModel> = Box::new(Sphere::new());
+    /*
     println!("Earth diameter is {} meters", spheroid.r);
     let xyz = spheroid.lle_to_xyz(PositionLLE{lat: -49.0, lon: -16.0, ele:1000.0});
     println!(" xyz = {}, {}, {}", xyz.x, xyz.y, xyz.z);
     let lle = spheroid.xyz_to_lle(xyz);
     println!(" lle = {}, {}, {}", lle.lat, lle.lon, lle.ele);
-
+    */
     //read_tile(49, 16);
     load_data(range);
 
