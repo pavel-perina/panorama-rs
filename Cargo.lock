@@ -27,14 +27,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d26a6ce4b6a484fa3edb70f7efa6fc430fd2b87285fe8b84304fd0936faa0dc0"
 
 [[package]]
-name = "hello-world"
-version = "0.1.0"
-dependencies = [
- "byteorder",
- "lodepng",
-]
-
-[[package]]
 name = "libc"
 version = "0.2.101"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -50,6 +42,14 @@ dependencies = [
  "cc",
  "libc",
  "rgb",
+]
+
+[[package]]
+name = "pano"
+version = "0.1.0"
+dependencies = [
+ "byteorder",
+ "lodepng",
 ]
 
 [[package]]
