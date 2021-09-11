@@ -1,5 +1,4 @@
 extern crate byteorder;
-//extern crate image;
 extern crate lodepng;
 // Naming conventions:                  https://doc.rust-lang.org/1.0.0/style/style/naming/README.html
 // Inheritance (traits):                https://riptutorial.com/rust/example/22917/inheritance-with-traits
@@ -19,11 +18,13 @@ extern crate lodepng;
 | |_| |  __/ (_) | |_| | |_| | \__ \
  \____|\___|\___/ \___/ \__|_|_|___/
 ******************************************************************/
+
 pub struct PositionLLE {
     lat: f64, // latitude  | phi   | +north/-south of equator
     lon: f64, // longitude | lamda | +east/-west of Greenwich
     ele: f64
 }
+
 
 pub struct PositionXYZ {
     x: f64,
@@ -31,20 +32,24 @@ pub struct PositionXYZ {
     z: f64
 }
 
+
 trait EarthModel {
     fn lle_to_xyz(&self, lle:PositionLLE) -> PositionXYZ;
     fn xyz_to_lle(&self, xyz:PositionXYZ) -> PositionLLE;
 }
 
+
 struct Sphere {
     r: f64
 }
+
 
 impl Sphere {
     fn new() -> Self {
         return Sphere {r:6378137.0};
     }
 }
+
 
 struct Spheroid {
     a: f64,
@@ -53,7 +58,6 @@ struct Spheroid {
     e: f64,
     e_sq: f64
 }
-
 
 
 impl EarthModel for Sphere {
@@ -76,6 +80,7 @@ impl EarthModel for Sphere {
         return PositionLLE{lat, lon, ele};
     }
 }
+
 
 impl Sphere {
     fn bearing(&self, p1:PositionLLE, p2:PositionLLE) -> f64 {
@@ -103,22 +108,17 @@ fn load_tile(lat:i32, lon:i32) ->  Vec<u16>
     use std::fs::File;
     use std::io::BufReader;
     use byteorder::{BigEndian, ReadBytesExt};
-    //use std::fmt;
-
     let array_size = 1201 * 1201;
     let file_name = format!("d:/_disk_d_old/devel-python/panorama/data_srtm/N{:02}E{:03}.hgt", lat, lon);
-    //println!("Reading {}", file_name);
     let mut buffer: Vec<u16> = Vec::with_capacity(1201*1201);
     let file = File::open(file_name).expect("Failed to open file!");
     let mut reader = BufReader::new(file);
     unsafe { buffer.set_len(array_size); }
     // TODO: clamp data, convert whatever is greater than for example 10K to zero (input data are signed)
     reader.read_u16_into::<BigEndian>(&mut buffer[..]).expect("Failed to read file!");
-    //println!("buf size = {}", buffer.len());
-    //println!("buf[0]={}", buffer[0]);    
-    //lodepng::encode_file("test.png", buffer.as_slice(), 1201, 1201, lodepng::ColorType::LCT_GREY, 16);
     return buffer;
 }
+
 
 struct LatLonRange {
     min_lat:i32,
@@ -127,13 +127,14 @@ struct LatLonRange {
     max_lon:i32
 }
 
+
 fn load_data(range:LatLonRange) -> Vec<u16> {
     let n_tiles_horiz: usize = (range.max_lon - range.min_lon + 1) as usize;
     let n_tiles_vert: usize  = (range.max_lat - range.min_lat + 1) as usize;
-    let n_tiles_total = n_tiles_horiz * n_tiles_vert;
-    let data_width    = n_tiles_horiz * 1200 + 1;
-    let data_height   = n_tiles_vert  * 1200 + 1;
-    let array_size    = data_width * data_height;
+    let n_tiles_total  = n_tiles_horiz * n_tiles_vert;
+    let data_width     = n_tiles_horiz * 1200 + 1;
+    let data_height    = n_tiles_vert  * 1200 + 1;
+    let array_size     = data_width * data_height;
 
     println!("Requesting data for area {}°N {}°E - {}°N {}°E ... (aprox. {:3.0}x{:3.0} km).",
         range.min_lat, range.min_lon,
@@ -146,7 +147,6 @@ fn load_data(range:LatLonRange) -> Vec<u16> {
         n_tiles_horiz, n_tiles_vert, n_tiles_total,
         data_width, data_height, array_size*2/1000000
         );
-
 
     let mut buffer: Vec<u16> = Vec::with_capacity(array_size);
     unsafe { buffer.set_len(array_size); }
