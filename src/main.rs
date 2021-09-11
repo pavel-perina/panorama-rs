@@ -124,45 +124,72 @@ struct LatLonRange {
     min_lat:i32,
     min_lon:i32,
     max_lat:i32,
-    max_lon:i32
+    max_lon:i32,
+    tiles_horiz:usize,
+    tiles_vert:usize,
+    data_width:usize,
+    data_height:usize,
+    pixels_per_deg:usize
+}
+
+impl LatLonRange {
+    fn new(min_lat:i32, min_lon:i32, max_lat:i32, max_lon:i32) -> Self {
+        let tiles_horiz:usize    = (max_lon - min_lon + 1) as usize;
+        let tiles_vert:usize     = (max_lat - min_lat + 1) as usize;
+        let pixels_per_deg:usize = 1200;
+        let data_width:usize     = tiles_horiz * 1200 + 1;
+        let data_height:usize    = tiles_vert * 1200 + 1;
+        return LatLonRange{min_lat, min_lon, max_lat, max_lon, 
+                           tiles_horiz, tiles_vert, 
+                           data_width, data_height,
+                           pixels_per_deg};
+    }
+    fn tiles_total(&self) -> usize {
+        self.tiles_horiz * self.tiles_vert
+    }
+    fn lat_lon_to_index(&self, lat:f64, lon:f64) -> usize {
+        let x:f64 = ((((self.max_lat+1) as f64) - lat) * 1200.0).max(0.0);
+        let y:f64 = (lon-(self.min_lon as f64) * 1200.0).max(0.0);
+        let c:usize = (x as usize).min(self.data_width);
+        let r:usize = (y as usize).min(self.data_height);
+        return r * self.data_width + c;
+    }
+    fn array_size(&self) -> usize {
+        self.data_height * self.data_width
+    }
 }
 
 
-fn load_data(range:LatLonRange) -> Vec<u16> {
-    let n_tiles_horiz: usize = (range.max_lon - range.min_lon + 1) as usize;
-    let n_tiles_vert: usize  = (range.max_lat - range.min_lat + 1) as usize;
-    let n_tiles_total  = n_tiles_horiz * n_tiles_vert;
-    let data_width     = n_tiles_horiz * 1200 + 1;
-    let data_height    = n_tiles_vert  * 1200 + 1;
-    let array_size     = data_width * data_height;
-
+fn load_data(range:LatLonRange) -> Vec<u16> 
+{
     println!("Requesting data for area {}°N {}°E - {}°N {}°E ... (aprox. {:3.0}x{:3.0} km).",
         range.min_lat, range.min_lon,
         range.max_lat, range.max_lon,
-        (n_tiles_horiz as f64) * 111.1 * (range.min_lat as f64).to_radians().cos(),
-        (n_tiles_vert  as f64) * 111.1
+        (range.tiles_horiz as f64) * 111.1 * (range.min_lat as f64).to_radians().cos(),
+        (range.tiles_vert  as f64) * 111.1
         );
 
     println!("I will read {}x{}={} tiles, heightmap size is {}x{} ({} MB).",
-        n_tiles_horiz, n_tiles_vert, n_tiles_total,
-        data_width, data_height, array_size*2/1000000
+        range.tiles_horiz, range.tiles_vert, range.tiles_total(),
+        range.data_width,  range.data_height, range.array_size()*2/1000000
         );
 
-    let mut buffer: Vec<u16> = Vec::with_capacity(array_size);
-    unsafe { buffer.set_len(array_size); }
+    let mut buffer: Vec<u16> = Vec::with_capacity(range.array_size());
+    unsafe { buffer.set_len(range.array_size()); }
 
     let mut progress = 0;
-    for i in 0..n_tiles_total {
-        let lat = range.min_lat + ((i / n_tiles_horiz) as i32);
-        let lon = range.min_lon + ((i % n_tiles_horiz) as i32);
+    for i in 0..range.tiles_total() {
+        let lat = range.min_lat + ((i / range.tiles_horiz) as i32);
+        let lon = range.min_lon + ((i % range.tiles_horiz) as i32);
         // Print progress
         progress += 1;
-        println!("Loading tile {:03}/{:03} lat={:02}, lon={:02}", progress, n_tiles_total, lat, lon);
+        println!("Loading tile {:03}/{:03} lat={:02}, lon={:02}", progress, range.tiles_total(), lat, lon);
         // Load tile
         let tile = load_tile(lat, lon);
         // Move to data
         let tile_y = (range.max_lat - lat) as usize;
         let tile_x = (lon - range.min_lon) as usize;
+        let data_width = range.data_width;
         for y in 0..=1200 {
             let row = tile_y * 1200 + y;
             let mut offset = (row * data_width) as usize;
@@ -176,6 +203,12 @@ fn load_data(range:LatLonRange) -> Vec<u16> {
     //lodepng::encode_file("test.png", buffer.as_slice(), 8401, 4801, lodepng::ColorType::LCT_GREY, 16);
 }
 
+
+fn get_height(range:LatLonRange, data:Vec<u16>, lat:f64, lon:f64) -> u16
+{
+    data[range.lat_lon_to_index(lat, lon)]
+}
+
 /******************************************************************
 __  __       _
 |  \/  | __ _(_)_ __
@@ -185,9 +218,9 @@ __  __       _
 ******************************************************************/
 
 fn main() {
-    let range = LatLonRange{min_lat: 47, min_lon: 15, max_lat: 50, max_lon: 21};
+    let range = LatLonRange::new(47,15, 50, 21);
     let eye   = PositionLLE{lat: 50.08309, lon: 17.23094, ele:1510.0};
-    let spheroid  = Sphere::new();    
+    let spheroid  = Sphere::new();
     //let earth_model:Box<dyn EarthModel> = Box::new(Sphere::new());
     /*
     println!("Earth diameter is {} meters", spheroid.r);
