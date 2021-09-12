@@ -2,6 +2,10 @@ extern crate byteorder;
 extern crate lodepng;
 extern crate nalgebra;
 
+use std::sync::{Arc,
+                atomic::{AtomicU16,
+                         Ordering::Relaxed}};
+
 use rayon::prelude::*;
 
 // Naming conventions:                  https://doc.rust-lang.org/1.0.0/style/style/naming/README.html
@@ -13,6 +17,7 @@ use rayon::prelude::*;
 // https://users.rust-lang.org/t/reading-an-array-of-ints-from-a-file-solved/16530/10
 // https://www.secondstate.io/articles/use-binary-data-as-function-input-and-output/
 // why 16bit image does not work, grrr  https://github.com/kornelski/lodepng-rust/issues/26
+// https://users.rust-lang.org/t/simultaneous-concurrent-read-and-write-into-a-buffer/56914
 
 
 /******************************************************************
@@ -179,8 +184,7 @@ fn load_data(range:&LatLonRange) -> Vec<u16>
         range.data_width,  range.data_height, range.array_size()*2/1000000
         );
 
-    let mut buffer: Vec<u16> = Vec::with_capacity(range.array_size());
-    unsafe { buffer.set_len(range.array_size()); }
+    let mut buffer: Vec<u16> = vec![0; range.array_size()];
 
     let mut progress = 0;
     // TODO: make this parallel with mutex around print progress?
@@ -200,14 +204,11 @@ fn load_data(range:&LatLonRange) -> Vec<u16>
             let row = tile_y * 1200 + y;
             let mut offset = (row * data_width) as usize;
             offset += tile_x * 1200;
-            for x in 0..=1200 {
-                buffer[offset + x] = tile[y * 1201 + x];
-            }/*
             unsafe {
                 let src_ptr = tile.as_ptr().offset((y*1201) as isize);
                 let dst_ptr = buffer.as_mut_ptr().offset(offset as isize);
                 std::ptr::copy_nonoverlapping(src_ptr, dst_ptr, 1201);
-            }*/
+            }
         }
     });
     return buffer;
@@ -273,11 +274,11 @@ impl View {
 
         let eye_xyz = earth_model.lle_to_xyz(&eye);
         let ref_point = vector![eye_xyz.x, eye_xyz.y, eye_xyz.z];
-        let v_z = vector![0.0,0.0,1.0];
-        let v_up = ref_point.normalize();
-        let v_down = -v_up;
-        let v_east= (v_down).cross(&v_z).normalize();
-        let v_north = v_east.cross(&v_down).normalize();
+        let v_z       = vector![0.0,0.0,1.0];
+        let v_up      = ref_point.normalize();
+        let v_down    = -v_up;
+        let v_east    = v_down.cross(&v_z).normalize();
+        let v_north   = v_east.cross(&v_down).normalize();
         //ref
 
         return View{
@@ -312,12 +313,13 @@ fn precompute_earth_curve(radius: f64, dist_max: f64, dist_step:f64) -> Vec<f64>
     }).collect();
 }
 
+
 fn make_dist_map(view:&View, range:&LatLonRange, height_map:&Vec<u16>) -> Vec<u16> {
     use nalgebra::vector;
 
     let eye_xyz = view.earth_model.lle_to_xyz(&view.eye);
     let ref_point = vector![eye_xyz.x, eye_xyz.y, eye_xyz.z];
-    let local_earth_radius = ref_point.norm(); //ref_point.dot(&ref_point).sqrt();
+    let local_earth_radius = ref_point.norm();
     let fake_earth_radius = local_earth_radius * view.refraction_coef;
     let earth_curve = precompute_earth_curve(fake_earth_radius, view.dist_max_m, view.dist_step_m);
 
@@ -325,14 +327,11 @@ fn make_dist_map(view:&View, range:&LatLonRange, height_map:&Vec<u16>) -> Vec<u1
     println!("Output size is {} x {} pixels", view.out_width, view.out_height);
     println!("Output resolution is {} mrad per pixel or {} pixels per degree", view.angular_step_r * 1000.0, view.angular_step_r.to_degrees().recip() );
     
-    let mut buffer: Vec<u16> = Vec::with_capacity(view.array_size());
-    unsafe { buffer.set_len(view.array_size()); }
-    buffer.fill(0);
+    let mut buffer = Vec::with_capacity(view.array_size());
+    buffer.resize_with(view.array_size(), || AtomicU16::new(0));
+    let data:Arc<[AtomicU16]> = Arc::from(buffer);
 
-    // TODO: threads
-    //for x in 0..view.out_width {
      (0..view.out_width).into_par_iter().for_each(|x| {
-
         let azimuth = view.azimuth_min_r + (x as f64) * view.angular_step_r;
         let cos_az = azimuth.cos();
         let sin_az = azimuth.sin();
@@ -352,13 +351,20 @@ fn make_dist_map(view:&View, range:&LatLonRange, height_map:&Vec<u16>) -> Vec<u1
                 let y_bot = ((view.elevation_max_r - elevation_r)/view.angular_step_r) as usize;
                 let v = (dist / view.dist_step_m) as u16;
                 for y in y_top..=y_bot {
-                    buffer[y * view.out_width + x] = v /19;
+                    data[y * view.out_width + x].store( v /19, Relaxed);
                 }
                 elevation_r = new_elevation_r;
             }
         }
     });
-    return buffer;
+
+    let mut result = Vec::with_capacity(view.array_size());
+    unsafe { result.set_len(view.array_size()); }
+    for i in 0..view.array_size() {
+        result[i] = data[i].load(Relaxed);
+    }
+
+    return result;
 }
 
 /******************************************************************
@@ -397,5 +403,5 @@ fn main() {
     let dist_map = make_dist_map(&view, &range, &height_map);
     println!("Distance map took {} seconds", dist_map_start.elapsed().as_secs_f64());
     println!("Saving image");
-    lodepng::encode_file("dist_map.png", &dist_map.as_slice(), view.out_width,view.out_height, lodepng::ColorType::LCT_GREY, 16);
+    lodepng::encode_file("dist_map.png", &dist_map.as_slice(), view.out_width,view.out_height, lodepng::ColorType::GREY, 16).unwrap();
 }
