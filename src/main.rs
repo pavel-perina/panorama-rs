@@ -1,6 +1,6 @@
 extern crate byteorder;
 extern crate lodepng;
-extern crate ndarray; // lazy to do vectors
+extern crate nalgebra;
 
 //use rayon::prelude::*;
 
@@ -154,8 +154,8 @@ impl LatLonRange {
     fn lat_lon_to_index(&self, lat:f64, lon:f64) -> usize {
         let y:f64 = ((((self.max_lat+1) as f64) - lat) * self.pixels_per_deg).max(0.0);
         let x:f64 = ((lon-(self.min_lon as f64)) * self.pixels_per_deg).max(0.0);
-        let c:usize = (x as usize).min(self.data_width);
-        let r:usize = (y as usize).min(self.data_height);
+        let c:usize = (x as usize).min(self.data_width-1);
+        let r:usize = (y as usize).min(self.data_height-1);
         //println!("x={} ({}), y={} ({}), offset={}", x,c,y,r,r*self.data_width +c);
         return r * self.data_width + c;
     }
@@ -238,13 +238,14 @@ struct View {
     dist_step_m:f64,
 
     refraction_coef:f64,
-/*
-    vUp:Vector{Float64}
-    vNorth:Vector{Float64}
-    vEast:Vector{Float64}
-*/
+
     out_width:usize,
     out_height:usize,
+
+    v_up:nalgebra::Vector3<f64>,
+    v_north:nalgebra::Vector3<f64>,
+    v_east:nalgebra::Vector3<f64>
+    
 }
 
 impl View {
@@ -252,6 +253,8 @@ impl View {
             azimuth_min_r:f64, azimuth_max_r:f64, elevation_min_r:f64, elevation_max_r:f64, angular_step_r:f64,
             dist_max_m:f64, refraction_coef:f64
      ) -> Self {
+         use nalgebra::{vector};
+
         let mut az_min_r =azimuth_min_r;
         if azimuth_min_r > azimuth_max_r {
             az_min_r -= 2.0 * std::f64::consts::PI;
@@ -260,15 +263,26 @@ impl View {
         let azimuth_delta = azimuth_max_r - az_min_r;
         //let az_min_r = az_min_r.rem_euclid(2.0 * PI);
         //let az_max_r = az_min_r + azimuth_delta;
-        let out_width  = ((azimuth_delta/angular_step_r) as usize) + 1;
-        let out_height = (((elevation_max_r - elevation_min_r)/angular_step_r) as usize) + 1;
+        // FIXME: added +1 to match Julia
+        let out_width  = ((azimuth_delta/angular_step_r) as usize) + 1 + 1;
+        let out_height = (((elevation_max_r - elevation_min_r)/angular_step_r) as usize) + 1 + 1;
+
+        let eye_xyz = earth_model.lle_to_xyz(&eye);
+        let ref_point = vector![eye_xyz.x, eye_xyz.y, eye_xyz.z];
+        let v_z = vector![0.0,0.0,1.0];
+        let v_up = ref_point.normalize();
+        let v_down = -v_up;
+        let v_east= (v_down).cross(&v_z).normalize();
+        let v_north = v_east.cross(&v_down).normalize();
+        //ref
 
         return View{
             earth_model, eye,
             azimuth_min_r:az_min_r, azimuth_max_r, elevation_min_r, elevation_max_r, angular_step_r,
             dist_max_m, dist_step_m:50.0,
             refraction_coef,
-            out_width, out_height
+            out_width, out_height,
+            v_up, v_north, v_east
         };
     }
 
@@ -286,13 +300,22 @@ impl View {
                                                    |_| 
 ******************************************************************/
 
+fn precompute_earth_curve(radius: f64, dist_max: f64, dist_step:f64) -> Vec<f64> {
+    let n_steps = (dist_max / dist_step) as usize + 1;
+    return (0..n_steps).map(|x|{
+        let fx = (x as f64) / dist_step;
+        (radius*radius-fx*fx).sqrt()
+    }).collect();
+}
+
 fn make_dist_map(view:&View, range:&LatLonRange, height_map:&Vec<u16>) -> Vec<u16> {
-    use ndarray::arr1;
+    use nalgebra::vector;
 
     let eye_xyz = view.earth_model.lle_to_xyz(&view.eye);
-    let ref_point = arr1(&[eye_xyz.x, eye_xyz.y, eye_xyz.y]);
-    let local_earth_radius = ref_point.dot(&ref_point).sqrt();
+    let ref_point = vector![eye_xyz.x, eye_xyz.y, eye_xyz.y];
+    let local_earth_radius = ref_point.norm(); //ref_point.dot(&ref_point).sqrt();
     let fake_earth_radius = local_earth_radius * view.refraction_coef;
+    let earth_curve = precompute_earth_curve(fake_earth_radius, view.dist_max_m, view.dist_step_m);
 
     println!("Earth radius is {:6.1} km (refraction x{:4.2})", local_earth_radius/1000.0, view.refraction_coef);
     println!("Output size is {} x {} pixels", view.out_width, view.out_height);
@@ -300,8 +323,35 @@ fn make_dist_map(view:&View, range:&LatLonRange, height_map:&Vec<u16>) -> Vec<u1
     
     let mut buffer: Vec<u16> = Vec::with_capacity(view.array_size());
     unsafe { buffer.set_len(view.array_size()); }
+    buffer.fill(0);
 
-
+    // TODO: threads
+    for x in 0..view.out_width {
+        let azimuth = view.azimuth_min_r + (x as f64) * view.angular_step_r;
+        let cos_az = azimuth.cos();
+        let sin_az = azimuth.sin();
+        let mut elevation_r = view.elevation_min_r;
+        let h0 = view.eye.ele;
+        let n_dist_steps = (view.dist_max_m / view.dist_step_m) as usize + 1;
+        let direction = view.v_north * cos_az + view.v_east * sin_az;
+        for i in 1..n_dist_steps {
+            let dist = (i as f64) / view.dist_step_m;
+            let point = ref_point + dist * direction;
+            let point_lle = view.earth_model.xyz_to_lle(&PositionXYZ{x:point[0], y:point[1], z:point[2]});
+            let raycast_height = h0 + elevation_r.sin() * dist;
+            let terrain_height = earth_curve[i] + (height_map[range.lat_lon_to_index(point_lle.lat, point_lle.lon)] as f64);
+            if terrain_height > raycast_height {
+                let new_elevation_r = (terrain_height-h0).atan2(dist);
+                let y_top = ((view.elevation_max_r - new_elevation_r)/view.angular_step_r) as usize;
+                let y_bot = ((view.elevation_max_r - elevation_r)/view.angular_step_r) as usize;
+                let v = (dist / view.dist_step_m) as u16;
+                for y in y_top..=y_bot {
+                    buffer[y * view.out_width + x] = v*250;
+                }
+                elevation_r = new_elevation_r;
+            }
+        }
+    }
 
     return buffer;
 }
@@ -335,4 +385,6 @@ fn main() {
                 250.0e3, 1.18);
 
     let dist_map = make_dist_map(&view, &range, &height_map);
+    println!("Saving image");
+    lodepng::encode_file("dist_map.png", &dist_map.as_slice(), view.out_width,view.out_height, lodepng::ColorType::LCT_GREY, 16);
 }
