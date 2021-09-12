@@ -202,7 +202,12 @@ fn load_data(range:&LatLonRange) -> Vec<u16>
             offset += tile_x * 1200;
             for x in 0..=1200 {
                 buffer[offset + x] = tile[y * 1201 + x];
-            }
+            }/*
+            unsafe {
+                let src_ptr = tile.as_ptr().offset((y*1201) as isize);
+                let dst_ptr = buffer.as_mut_ptr().offset(offset as isize);
+                std::ptr::copy_nonoverlapping(src_ptr, dst_ptr, 1201);
+            }*/
         }
     });
     return buffer;
@@ -346,7 +351,7 @@ fn make_dist_map(view:&View, range:&LatLonRange, height_map:&Vec<u16>) -> Vec<u1
                 let y_bot = ((view.elevation_max_r - elevation_r)/view.angular_step_r) as usize;
                 let v = (dist / view.dist_step_m) as u16;
                 for y in y_top..=y_bot {
-                    buffer[y * view.out_width + x] = v /20;
+                    buffer[y * view.out_width + x] = v /19;
                 }
                 elevation_r = new_elevation_r;
             }
@@ -364,6 +369,8 @@ fn make_dist_map(view:&View, range:&LatLonRange, height_map:&Vec<u16>) -> Vec<u1
 ******************************************************************/
 
 fn main() {
+    use std::time::Instant;
+
     let range = LatLonRange::new(47,15, 50, 21);
     let eye   = PositionLLE{lat: 50.08309, lon: 17.23094, ele:1510.0};
     let spheroid  = Sphere::new();
@@ -376,14 +383,18 @@ fn main() {
     println!(" lle = {}, {}, {}", lle.lat, lle.lon, lle.ele);
     */
     //read_tile(49, 16);
+    let load_start = Instant::now();
     let height_map = load_data(&range);
+    println!("Loading took {} seconds", load_start.elapsed().as_secs_f64());
     //println!("Height at {}, {} is {}", eye.lat, eye.lon, get_height(&range, &data, eye.lat, eye.lon));
     let view = View::new(
         spheroid, eye, 
                 (90.0 as f64).to_radians(), (135.0 as f64).to_radians(), -0.0560, 0.0339, 0.0001, 
                 250.0e3, 1.18);
 
+    let dist_map_start = Instant::now();
     let dist_map = make_dist_map(&view, &range, &height_map);
+    println!("Distance map took {} seconds", dist_map_start.elapsed().as_secs_f64());
     println!("Saving image");
     lodepng::encode_file("dist_map.png", &dist_map.as_slice(), view.out_width,view.out_height, lodepng::ColorType::LCT_GREY, 16);
 }
