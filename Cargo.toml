@@ -10,7 +10,7 @@ authors = ["Pavel Perina <pavel.perina@gmail.com>"]
 byteorder="1"
 #image = "0.23.14"
 lodepng="1"
-#rayon = "1.5"
+rayon = "1.5"
 #ndarray = "0.15.0"
 nalgebra = "0.29"
 

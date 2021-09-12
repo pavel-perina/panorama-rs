@@ -2,7 +2,7 @@ extern crate byteorder;
 extern crate lodepng;
 extern crate nalgebra;
 
-//use rayon::prelude::*;
+use rayon::prelude::*;
 
 // Naming conventions:                  https://doc.rust-lang.org/1.0.0/style/style/naming/README.html
 // Inheritance (traits):                https://riptutorial.com/rust/example/22917/inheritance-with-traits
@@ -250,7 +250,6 @@ struct View {
     v_up:nalgebra::Vector3<f64>,
     v_north:nalgebra::Vector3<f64>,
     v_east:nalgebra::Vector3<f64>
-    
 }
 
 impl View {
@@ -331,7 +330,9 @@ fn make_dist_map(view:&View, range:&LatLonRange, height_map:&Vec<u16>) -> Vec<u1
     buffer.fill(0);
 
     // TODO: threads
-    for x in 0..view.out_width {
+    //for x in 0..view.out_width {
+     (0..view.out_width).into_par_iter().for_each(|x| {
+
         let azimuth = view.azimuth_min_r + (x as f64) * view.angular_step_r;
         let cos_az = azimuth.cos();
         let sin_az = azimuth.sin();
@@ -356,7 +357,7 @@ fn make_dist_map(view:&View, range:&LatLonRange, height_map:&Vec<u16>) -> Vec<u1
                 elevation_r = new_elevation_r;
             }
         }
-    }
+    });
     return buffer;
 }
 
