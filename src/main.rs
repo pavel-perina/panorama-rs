@@ -303,8 +303,8 @@ impl View {
 fn precompute_earth_curve(radius: f64, dist_max: f64, dist_step:f64) -> Vec<f64> {
     let n_steps = (dist_max / dist_step) as usize + 1;
     return (0..n_steps).map(|x|{
-        let fx = (x as f64) / dist_step;
-        (radius*radius-fx*fx).sqrt()
+        let fx = (x as f64) * dist_step;
+        return (radius*radius-fx*fx).sqrt() - radius;
     }).collect();
 }
 
@@ -312,7 +312,7 @@ fn make_dist_map(view:&View, range:&LatLonRange, height_map:&Vec<u16>) -> Vec<u1
     use nalgebra::vector;
 
     let eye_xyz = view.earth_model.lle_to_xyz(&view.eye);
-    let ref_point = vector![eye_xyz.x, eye_xyz.y, eye_xyz.y];
+    let ref_point = vector![eye_xyz.x, eye_xyz.y, eye_xyz.z];
     let local_earth_radius = ref_point.norm(); //ref_point.dot(&ref_point).sqrt();
     let fake_earth_radius = local_earth_radius * view.refraction_coef;
     let earth_curve = precompute_earth_curve(fake_earth_radius, view.dist_max_m, view.dist_step_m);
@@ -335,7 +335,7 @@ fn make_dist_map(view:&View, range:&LatLonRange, height_map:&Vec<u16>) -> Vec<u1
         let n_dist_steps = (view.dist_max_m / view.dist_step_m) as usize + 1;
         let direction = view.v_north * cos_az + view.v_east * sin_az;
         for i in 1..n_dist_steps {
-            let dist = (i as f64) / view.dist_step_m;
+            let dist = (i as f64) * view.dist_step_m;
             let point = ref_point + dist * direction;
             let point_lle = view.earth_model.xyz_to_lle(&PositionXYZ{x:point[0], y:point[1], z:point[2]});
             let raycast_height = h0 + elevation_r.sin() * dist;
@@ -346,13 +346,12 @@ fn make_dist_map(view:&View, range:&LatLonRange, height_map:&Vec<u16>) -> Vec<u1
                 let y_bot = ((view.elevation_max_r - elevation_r)/view.angular_step_r) as usize;
                 let v = (dist / view.dist_step_m) as u16;
                 for y in y_top..=y_bot {
-                    buffer[y * view.out_width + x] = v*250;
+                    buffer[y * view.out_width + x] = v /20;
                 }
                 elevation_r = new_elevation_r;
             }
         }
     }
-
     return buffer;
 }
 
