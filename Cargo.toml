@@ -2,6 +2,7 @@
 name = "pano"
 version = "0.1.0"
 edition = "2018"
+authors = ["Pavel Perina <pavel.perina@gmail.com>"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -9,3 +10,6 @@ edition = "2018"
 byteorder="1"
 #image = "0.23.14"
 lodepng="1"
+#rayon = "1.5"
+ndarray = "0.15.0"
+

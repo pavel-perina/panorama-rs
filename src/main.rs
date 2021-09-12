@@ -1,5 +1,9 @@
 extern crate byteorder;
 extern crate lodepng;
+extern crate ndarray; // lazy to do vectors
+
+//use rayon::prelude::*;
+
 // Naming conventions:                  https://doc.rust-lang.org/1.0.0/style/style/naming/README.html
 // Inheritance (traits):                https://riptutorial.com/rust/example/22917/inheritance-with-traits
 // Defining and Instantiating Structs:  https://doc.rust-lang.org/book/ch05-01-defining-structs.html
@@ -34,8 +38,8 @@ pub struct PositionXYZ {
 
 
 trait EarthModel {
-    fn lle_to_xyz(&self, lle:PositionLLE) -> PositionXYZ;
-    fn xyz_to_lle(&self, xyz:PositionXYZ) -> PositionLLE;
+    fn lle_to_xyz(&self, lle:&PositionLLE) -> PositionXYZ;
+    fn xyz_to_lle(&self, xyz:&PositionXYZ) -> PositionLLE;
 }
 
 
@@ -50,7 +54,7 @@ impl Sphere {
     }
 }
 
-
+/*
 struct Spheroid {
     a: f64,
     b: f64,
@@ -58,11 +62,11 @@ struct Spheroid {
     e: f64,
     e_sq: f64
 }
-
+*/
 
 impl EarthModel for Sphere {
 
-    fn lle_to_xyz(&self, p:PositionLLE) -> PositionXYZ {
+    fn lle_to_xyz(&self, p:&PositionLLE) -> PositionXYZ {
         let phi    = p.lat.to_radians();
         let lambda = p.lon.to_radians();
         let v = self.r + p.ele;
@@ -72,7 +76,7 @@ impl EarthModel for Sphere {
         return PositionXYZ{x, y, z};
     }
 
-    fn xyz_to_lle(&self, p:PositionXYZ) -> PositionLLE {
+    fn xyz_to_lle(&self, p:&PositionXYZ) -> PositionLLE {
         let v= (p.x*p.x + p.y*p.y + p.z*p.z).sqrt();
         let ele = v - self.r;
         let lon = p.y.atan2(p.x).to_degrees(); // WTF? atan(y/x)!
@@ -83,7 +87,7 @@ impl EarthModel for Sphere {
 
 
 impl Sphere {
-    fn bearing(&self, p1:PositionLLE, p2:PositionLLE) -> f64 {
+    fn bearing(&self, p1:&PositionLLE, p2:&PositionLLE) -> f64 {
         let phi1     = p1.lat.to_radians();
         let phi2     = p2.lat.to_radians();
         let d_lambda = (p2.lon - p1.lon).to_radians();
@@ -178,9 +182,8 @@ fn load_data(range:&LatLonRange) -> Vec<u16>
     let mut buffer: Vec<u16> = Vec::with_capacity(range.array_size());
     unsafe { buffer.set_len(range.array_size()); }
 
-    //use rayon::prelude::*;
-
     let mut progress = 0;
+    // TODO: make this parallel with mutex around print progress?
     (0..range.tiles_total()).into_iter().for_each(|i| {
         let lat = range.min_lat + ((i / range.tiles_horiz) as i32);
         let lon = range.min_lon + ((i % range.tiles_horiz) as i32);
@@ -212,7 +215,96 @@ fn get_height(range:&LatLonRange, data:&Vec<u16>, lat:f64, lon:f64) -> u16
     data[range.lat_lon_to_index(lat, lon)]
 }
 
+/******************************************************************
+__     ___
+\ \   / (_) _____      __
+ \ \ / /| |/ _ \ \ /\ / /
+  \ V / | |  __/\ V  V /
+   \_/  |_|\___| \_/\_/
+******************************************************************/
 
+struct View {
+    earth_model:Sphere,
+    //earth_model:Box<dyn EarthModel>,
+    eye:PositionLLE,
+
+    azimuth_min_r:f64,
+    azimuth_max_r:f64,
+    elevation_min_r:f64,
+    elevation_max_r:f64,
+    angular_step_r:f64,
+
+    dist_max_m:f64,
+    dist_step_m:f64,
+
+    refraction_coef:f64,
+/*
+    vUp:Vector{Float64}
+    vNorth:Vector{Float64}
+    vEast:Vector{Float64}
+*/
+    out_width:usize,
+    out_height:usize,
+}
+
+impl View {
+    fn new(/*earth_model:Box<dyn EarthModel>*/earth_model:Sphere, eye:PositionLLE,
+            azimuth_min_r:f64, azimuth_max_r:f64, elevation_min_r:f64, elevation_max_r:f64, angular_step_r:f64,
+            dist_max_m:f64, refraction_coef:f64
+     ) -> Self {
+        let mut az_min_r =azimuth_min_r;
+        if azimuth_min_r > azimuth_max_r {
+            az_min_r -= 2.0 * std::f64::consts::PI;
+        }
+        // TODO: throw if > 2pi
+        let azimuth_delta = azimuth_max_r - az_min_r;
+        //let az_min_r = az_min_r.rem_euclid(2.0 * PI);
+        //let az_max_r = az_min_r + azimuth_delta;
+        let out_width  = ((azimuth_delta/angular_step_r) as usize) + 1;
+        let out_height = (((elevation_max_r - elevation_min_r)/angular_step_r) as usize) + 1;
+
+        return View{
+            earth_model, eye,
+            azimuth_min_r:az_min_r, azimuth_max_r, elevation_min_r, elevation_max_r, angular_step_r,
+            dist_max_m, dist_step_m:50.0,
+            refraction_coef,
+            out_width, out_height
+        };
+    }
+
+    fn array_size(&self) -> usize {
+        self.out_width * self.out_height
+    }
+}
+
+/******************************************************************
+ ____  _     _                         __  __
+|  _ \(_)___| |_ __ _ _ __   ___ ___  |  \/  | __ _ _ __  
+| | | | / __| __/ _` | '_ \ / __/ _ \ | |\/| |/ _` | '_ \ 
+| |_| | \__ \ || (_| | | | | (_|  __/ | |  | | (_| | |_) |
+|____/|_|___/\__\__,_|_| |_|\___\___| |_|  |_|\__,_| .__/ 
+                                                   |_| 
+******************************************************************/
+
+fn make_dist_map(view:&View, range:&LatLonRange, height_map:&Vec<u16>) -> Vec<u16> {
+    use ndarray::arr1;
+
+    let eye_xyz = view.earth_model.lle_to_xyz(&view.eye);
+    let ref_point = arr1(&[eye_xyz.x, eye_xyz.y, eye_xyz.y]);
+    let local_earth_radius = ref_point.dot(&ref_point).sqrt();
+    let fake_earth_radius = local_earth_radius * view.refraction_coef;
+
+    println!("Earth radius is {:6.1} km (refraction x{:4.2})", local_earth_radius/1000.0, view.refraction_coef);
+    println!("Output size is {} x {} pixels", view.out_width, view.out_height);
+    println!("Output resolution is {} mrad per pixel or {} pixels per degree", view.angular_step_r * 1000.0, view.angular_step_r.to_degrees().recip() );
+    
+    let mut buffer: Vec<u16> = Vec::with_capacity(view.array_size());
+    unsafe { buffer.set_len(view.array_size()); }
+
+
+
+    return buffer;
+}
 
 /******************************************************************
  __  __       _
@@ -235,8 +327,12 @@ fn main() {
     println!(" lle = {}, {}, {}", lle.lat, lle.lon, lle.ele);
     */
     //read_tile(49, 16);
-    let data = load_data(&range);
-    let elevation =get_height(&range, &data, eye.lat, eye.lon);
-    println!("Height at {}, {} is {}", eye.lat, eye.lon, elevation);
+    let height_map = load_data(&range);
+    //println!("Height at {}, {} is {}", eye.lat, eye.lon, get_height(&range, &data, eye.lat, eye.lon));
+    let view = View::new(
+        spheroid, eye, 
+                (90.0 as f64).to_radians(), (135.0 as f64).to_radians(), -0.0560, 0.0339, 0.0001, 
+                250.0e3, 1.18);
 
+    let dist_map = make_dist_map(&view, &range, &height_map);
 }
