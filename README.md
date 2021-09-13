@@ -8,6 +8,15 @@ See readme of the same project in Julia https://github.com/pavel-perina/panorama
 
 This one is basically 1:1 rewrite.
 
+## Screenshots
+
+![Linux setup](Screenshot_20210913_223939.png)
+Trying to run it in Linux on an old notebook
+
+![Distance map](dist_map_crop.png)
+Part of distance map
+
+
 ## Performance comparison 
 
 i5-4590@3.3GHz
