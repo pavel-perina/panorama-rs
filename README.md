@@ -68,7 +68,7 @@ Both Python and Julia use REPL (Read–eval–print loop) and they have shell or
 
 Support of Julia in VS Code feels worst.
 
-**Rust** is different and in many ways it reminds C. Code compiles to executable file. Syntax is quite unique and surprisingly somewhat similar to Julia. What I found unique is rust-analyzer and Visual Studio Code integration, where types are automagically determined as you write and displayed in the code and syntax is checked. Sometimes it's nice, sometimes it's pretty annoying. However neither of Python, Julia or Rust have classes like C++.
+**Rust** is different and in many ways it reminds C with some of the co. Code compiles to executable file. Syntax is quite unique and surprisingly somewhat similar to Julia. What I found unique is rust-analyzer and Visual Studio Code integration, where types are automagically determined as you write and displayed in the code and syntax is checked. Sometimes it's nice, sometimes it's pretty annoying. However neither of Python, Julia or Rust have classes like C++.
 
 Rust has unusual hard-to-read syntax: `return y.atan2(x).to_degrees().rem_euclid(360.0);` compared to C++: `double a = atan2(y,x)*180.0/M_PI; return a>=0 ? a : a+360.0;`
 
