@@ -7,8 +7,7 @@ use std::sync::{Arc,
                          Ordering::Relaxed}};
 
 use rayon::prelude::*;
-use serde::Deserialize;
-use csv::{self, StringRecord};
+use csv::{self};
 
 // Naming conventions:                  https://doc.rust-lang.org/1.0.0/style/style/naming/README.html
 // Inheritance (traits):                https://riptutorial.com/rust/example/22917/inheritance-with-traits
@@ -49,6 +48,8 @@ pub struct PositionXYZ {
 trait EarthModel {
     fn lle_to_xyz(&self, lle:&PositionLLE) -> PositionXYZ;
     fn xyz_to_lle(&self, xyz:&PositionXYZ) -> PositionLLE;
+    fn bearing(&self, p1:&PositionLLE, p2:&PositionLLE) -> f64;
+    fn distance(&self, p1:&PositionLLE, p2:&PositionLLE) -> f64;
 }
 
 
@@ -92,10 +93,7 @@ impl EarthModel for Sphere {
         let lat = (p.z/v).asin().to_degrees();
         return PositionLLE{lat, lon, ele};
     }
-}
 
-
-impl Sphere {
     fn bearing(&self, p1:&PositionLLE, p2:&PositionLLE) -> f64 {
         let phi1     = p1.lat.to_radians();
         let phi2     = p2.lat.to_radians();
@@ -104,6 +102,11 @@ impl Sphere {
         let x = phi1.cos() * phi2.sin() - phi1.sin()*phi2.cos() * d_lambda.cos();
         let theta = y.atan2(x);
         return theta.to_degrees().rem_euclid(360.0);
+    }
+
+    fn distance(&self, p1:&PositionLLE, p2:&PositionLLE) -> f64 {
+        assert!(false, "Not implemented");
+        f64::INFINITY
     }
 }
 
@@ -408,18 +411,25 @@ impl IntoHill for (std::string::String, f64, f64, f64) {
 
 fn draw_annotations(view:&View, dist_map:&Vec<u16>, outlines:&Vec<u8>)
 {
-    println!("Loading summit database");
+    let p_ref =view.earth_model.lle_to_xyz(&view.eye);
+    // TODO: prepare drawing canvas
+    println!("Loading summit database");    
     let mut reader = csv::ReaderBuilder::new().delimiter(b'\t').from_path("osm-cz-sk.tsv").unwrap();
     type RecordType = (String, f64, f64, f64);
     for wrapped_record in reader.deserialize() {
-        //let hill:Hill = item.unwrap();
         let record: RecordType = wrapped_record.unwrap();
         let hill = Hill::new(record);
-        let lle = hill.lle;
-        println!("{} {} {} {}", hill.name, lle.lat, lle.lon, lle.ele);
+        let dist = view.earth_model.distance(&view.eye, &hill.lle);
+        if dist > view.dist_max_m {
+            continue;
+        }
+        let azimuth_r = view.earth_model.bearing(&view.eye, &hill.lle).to_radians();
+        // FIXME: weird numbers, euclidian?
+        if azimuth_r < view.azimuth_min_r || azimuth_r > view.azimuth_max_r {
+            continue;
+        }
     }
-
-
+    // TODO: draw azimuth ticks, horizon
 }
 
 /******************************************************************
