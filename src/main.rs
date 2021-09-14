@@ -7,6 +7,8 @@ use std::sync::{Arc,
                          Ordering::Relaxed}};
 
 use rayon::prelude::*;
+use serde::Deserialize;
+use csv;
 
 // Naming conventions:                  https://doc.rust-lang.org/1.0.0/style/style/naming/README.html
 // Inheritance (traits):                https://riptutorial.com/rust/example/22917/inheritance-with-traits
@@ -18,6 +20,7 @@ use rayon::prelude::*;
 // https://www.secondstate.io/articles/use-binary-data-as-function-input-and-output/
 // why 16bit image does not work, grrr  https://github.com/kornelski/lodepng-rust/issues/26
 // https://users.rust-lang.org/t/simultaneous-concurrent-read-and-write-into-a-buffer/56914
+// https://levelup.gitconnected.com/working-with-csv-data-in-rust-7258163252f8
 
 
 /******************************************************************
@@ -215,12 +218,6 @@ fn load_data(range:&LatLonRange) -> Vec<u16>
     //lodepng::encode_file("test.png", buffer.as_slice(), 8401, 4801, lodepng::ColorType::LCT_GREY, 16);
 }
 
-
-fn get_height(range:&LatLonRange, data:&Vec<u16>, lat:f64, lon:f64) -> u16
-{
-    data[range.lat_lon_to_index(lat, lon)]
-}
-
 /******************************************************************
 __     ___
 \ \   / (_) _____      __
@@ -332,13 +329,11 @@ fn make_dist_map(view:&View, range:&LatLonRange, height_map:&Vec<u16>) -> Vec<u1
     let data:Arc<[AtomicU16]> = Arc::from(buffer);
 
      (0..view.out_width).into_par_iter().for_each(|x| {
-        let azimuth = view.azimuth_min_r + (x as f64) * view.angular_step_r;
-        let cos_az = azimuth.cos();
-        let sin_az = azimuth.sin();
+        let azimuth_r = view.azimuth_min_r + (x as f64) * view.angular_step_r;
         let mut elevation_r = view.elevation_min_r;
         let h0 = view.eye.ele;
         let n_dist_steps = (view.dist_max_m / view.dist_step_m) as usize + 1;
-        let direction = view.v_north * cos_az + view.v_east * sin_az;
+        let direction = view.v_north * azimuth_r.cos() + view.v_east * azimuth_r.sin();
         for i in 1..n_dist_steps {
             let dist = (i as f64) * view.dist_step_m;
             let point = ref_point + dist * direction;
@@ -351,7 +346,7 @@ fn make_dist_map(view:&View, range:&LatLonRange, height_map:&Vec<u16>) -> Vec<u1
                 let y_bot = ((view.elevation_max_r - elevation_r)/view.angular_step_r) as usize;
                 let v = (dist / view.dist_step_m) as u16;
                 for y in y_top..=y_bot {
-                    data[y * view.out_width + x].store( v /19, Relaxed);
+                    data[y * view.out_width + x].store( v, Relaxed);
                 }
                 elevation_r = new_elevation_r;
             }
@@ -365,6 +360,50 @@ fn make_dist_map(view:&View, range:&LatLonRange, height_map:&Vec<u16>) -> Vec<u1
     }
 
     return result;
+}
+
+
+fn extract_outlines(view:&View, dist_map:&Vec<u16>) -> Vec<u8> {
+    let mut result:Vec<u8> = Vec::with_capacity(view.array_size());
+    unsafe { result.set_len(view.array_size()) }
+    for col in 0..view.out_width {
+        result[col] = 255;
+    }
+    for row in 1..view.out_height {
+        for col in 0..view.out_width {
+            let mut diff = (dist_map[view.out_width * (row - 1) + col] as i16) - (dist_map[view.out_width * row + col] as i16);
+            diff = diff.abs().clamp(0, 255);
+            result[view.out_width * row + col] = 255 - (diff as u8);
+        }
+    }
+    return result;
+}
+
+
+#[derive(Debug, Deserialize)]
+struct Hill {
+    name:String,
+    elevation:f64,
+    lat:f64,
+    lon:f64
+}
+
+
+fn draw_annotations(view:&View, dist_map:&Vec<u16>, outlines:&Vec<u8>)
+{
+    println!("Loading summit database");
+    let mut reader = csv::ReaderBuilder::new().delimiter(b'\t').from_path("osm-cz-sk.tsv").unwrap();
+    //let headers = reader.headers().unwrap();
+    //println!("{:?}", headers);
+    //let data = reader.deserialize().unwrap();
+    reader.set_headers(csv::StringRecord::from(vec!["name", "elevation", "lat", "lon"]));
+    for item in reader.deserialize() {
+        let hill:Hill = item.unwrap();
+        println!("Name: {}, Elevation: {}, Latitude: {}, Longitude: {}", hill.name, hill.elevation, hill.lat, hill.lon);
+        //println!("record: {:?}", item.unwrap());
+    }
+
+
 }
 
 /******************************************************************
@@ -402,6 +441,12 @@ fn main() {
     let dist_map_start = Instant::now();
     let dist_map = make_dist_map(&view, &range, &height_map);
     println!("Distance map took {} seconds", dist_map_start.elapsed().as_secs_f64());
-    println!("Saving image");
+    println!("Saving dist_map.png");
     lodepng::encode_file("dist_map.png", &dist_map.as_slice(), view.out_width,view.out_height, lodepng::ColorType::GREY, 16).unwrap();
+    println!("Extracting outlines");
+    let outlines = extract_outlines(&view, &dist_map);
+    println!("Saving outlines.png");
+    lodepng::encode_file("outlines.png", &outlines[..], view.out_width,view.out_height, lodepng::ColorType::GREY, 8).unwrap();
+    draw_annotations(&view, &dist_map, &outlines);
+    println!("All done.")
 }
