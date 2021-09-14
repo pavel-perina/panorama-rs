@@ -388,15 +388,27 @@ struct Hill {
 
 
 impl Hill {    
-    fn new(name:String, lat:f64, lon:f64, ele:f64) -> Self {
+    /*fn new(name:String, lat:f64, lon:f64, ele:f64) -> Self {
         return Hill{name, lle: PositionLLE{lat, lon, ele}};
-    }
+    }*/
     /*fn to_lle(&self) -> PositionLLE{
         return PositionLLE{lat:self.lat, lon:self.lon, ele:self.ele};
     }*/
+    fn new<A>(args: A) -> Hill 
+    where A: IntoHill{ 
+        args.into()
+    }
 }
 
+trait IntoHill {
+    fn into(self) -> Hill;
+}
 
+impl IntoHill for (std::string::String, f64, f64, f64) {
+    fn into(self) -> Hill {
+        return Hill{name:self.0.clone(), lle:PositionLLE{lat:self.1, lon:self.2, ele:self.3}};
+    }
+}
 
 fn draw_annotations(view:&View, dist_map:&Vec<u16>, outlines:&Vec<u8>)
 {
@@ -406,7 +418,7 @@ fn draw_annotations(view:&View, dist_map:&Vec<u16>, outlines:&Vec<u8>)
     for wrapped_record in reader.deserialize() {            
         //let hill:Hill = item.unwrap();
         let record: RecordType = wrapped_record.unwrap();
-        let hill = Hill::new(record.0, record.1, record.2, record.3);
+        let hill = IntoHill::into(record);
         let lle = hill.lle;
         println!("{} {} {} {}", hill.name, lle.lat, lle.lon, lle.ele);
     }
