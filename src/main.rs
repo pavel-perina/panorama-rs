@@ -21,6 +21,7 @@ use csv::{self, StringRecord};
 // why 16bit image does not work, grrr  https://github.com/kornelski/lodepng-rust/issues/26
 // https://users.rust-lang.org/t/simultaneous-concurrent-read-and-write-into-a-buffer/56914
 // https://levelup.gitconnected.com/working-with-csv-data-in-rust-7258163252f8
+// https://docs.rs/csv/1.0.0-beta.5/csv/tutorial/index.html
 
 
 /******************************************************************
@@ -380,56 +381,27 @@ fn extract_outlines(view:&View, dist_map:&Vec<u16>) -> Vec<u8> {
 }
 
 
-
+#[derive(Debug, Deserialize)]
 struct Hill {
+    #[serde(rename="Summit")]
     name:String,
-    lle:PositionLLE
+    #[serde(rename="Elevation")]
+    ele:f64,
+    #[serde(rename="Latitude")]
+    lat:f64,
+    #[serde(rename="Longitude")]
+    lon:f64
 }
 
 
-impl Hill {
+impl Hill {    
     /*fn new(name:String, lat:f64, lon:f64, ele:f64) -> Self {
         return Hill{name, lle: PositionLLE{lat, lon, ele}};
     }*/
-    fn new<A>(args: A) -> Hill 
-    where A: IntoHill{ 
-        args.into()
+    fn to_lle(&self) -> PositionLLE{
+        return PositionLLE{lat:self.lat, lon:self.lon, ele:self.ele};
     }
 }
-
-trait IntoHill {
-    fn into(self) -> Hill;
-}
-
-impl IntoHill for (&String, &String, &String, &String) {
-    fn into(self) -> Hill {
-        let f_lat = self.1.parse::<f64>().unwrap();
-        let f_lon = self.2.parse::<f64>().unwrap();
-        let f_ele = self.3.parse::<f64>().unwrap();
-        return Hill{name:self.0.clone(), lle:PositionLLE{lat:f_lat, lon:f_lon, ele:f_ele}};        
-    }
-}
-
-impl IntoHill for (&String, f64, f64, f64) {
-    fn into(self) -> Hill {
-        return Hill{name:self.0.clone(), lle:PositionLLE{lat:self.1, lon:self.2, ele:self.3}};
-    }
-}
-
-impl IntoHill for (csv::StringRecord) {
-    fn into(self) -> Hill {
-        let srec = self;
-        assert!(srec.len() == 4);
-        //return Hill::new(&srec[0], &srec[1], &srec[2], &srec[3]);
-        let f_lat = srec[1].parse::<f64>().unwrap();
-        let f_lon = srec[2].parse::<f64>().unwrap();
-        let f_ele = srec[3].parse::<f64>().unwrap();
-        //let mut String name; srec[0].clone_into(target);
-        return Hill{name:srec[0].to_string(), lle:PositionLLE{lat:f_lat, lon:f_lon, ele:f_ele}};        
-
-    }
-}
-
 
 
 
@@ -437,22 +409,9 @@ fn draw_annotations(view:&View, dist_map:&Vec<u16>, outlines:&Vec<u8>)
 {
     println!("Loading summit database");
     let mut reader = csv::ReaderBuilder::new().delimiter(b'\t').from_path("osm-cz-sk.tsv").unwrap();
-    //let headers = reader.headers().unwrap();
-    //println!("{:?}", headers);
-    //let data = reader.deserialize().unwrap();
-    reader.set_headers(csv::StringRecord::from(vec!["name", "elevation", "lat", "lon"]));
-    //for item in reader.deserialize() {            
-        //let hill:Hill = item.unwrap();
-    for record in reader.records() {
-        let srec = record.unwrap();
-        let hill = Hill::new(srec);
-        println!("{} {} {} {}", hill.name, hill.lle.lat, hill.lle.lon, hill.lle.ele);
-
-        
-
-
-        //println!("Name: {}, Elevation: {}, Latitude: {}, Longitude: {}", hill.name, hill.elevation, hill.lat, hill.lon);
-        //println!("record: {:?}", srec);
+    for item in reader.deserialize() {            
+        let hill:Hill = item.unwrap();
+        println!("{} {} {} {}", hill.name, hill.lat, hill.lon, hill.ele);
     }
 
 
