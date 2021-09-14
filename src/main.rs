@@ -381,26 +381,19 @@ fn extract_outlines(view:&View, dist_map:&Vec<u16>) -> Vec<u8> {
 }
 
 
-#[derive(Debug, Deserialize)]
 struct Hill {
-    #[serde(rename="Summit")]
     name:String,
-    #[serde(rename="Elevation")]
-    ele:f64,
-    #[serde(rename="Latitude")]
-    lat:f64,
-    #[serde(rename="Longitude")]
-    lon:f64
+    lle:PositionLLE
 }
 
 
 impl Hill {    
-    /*fn new(name:String, lat:f64, lon:f64, ele:f64) -> Self {
+    fn new(name:String, lat:f64, lon:f64, ele:f64) -> Self {
         return Hill{name, lle: PositionLLE{lat, lon, ele}};
-    }*/
-    fn to_lle(&self) -> PositionLLE{
-        return PositionLLE{lat:self.lat, lon:self.lon, ele:self.ele};
     }
+    /*fn to_lle(&self) -> PositionLLE{
+        return PositionLLE{lat:self.lat, lon:self.lon, ele:self.ele};
+    }*/
 }
 
 
@@ -409,9 +402,13 @@ fn draw_annotations(view:&View, dist_map:&Vec<u16>, outlines:&Vec<u8>)
 {
     println!("Loading summit database");
     let mut reader = csv::ReaderBuilder::new().delimiter(b'\t').from_path("osm-cz-sk.tsv").unwrap();
-    for item in reader.deserialize() {            
-        let hill:Hill = item.unwrap();
-        println!("{} {} {} {}", hill.name, hill.lat, hill.lon, hill.ele);
+    type RecordType = (String, f64, f64, f64);
+    for wrapped_record in reader.deserialize() {            
+        //let hill:Hill = item.unwrap();
+        let record: RecordType = wrapped_record.unwrap();
+        let hill = Hill::new(record.0, record.1, record.2, record.3);
+        let lle = hill.lle;
+        println!("{} {} {} {}", hill.name, lle.lat, lle.lon, lle.ele);
     }
 
 
