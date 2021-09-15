@@ -8,7 +8,7 @@ use std::sync::{Arc,
 
 use rayon::prelude::*;
 use csv::{self};
-use serde::__private::de::borrow_cow_str;
+//use serde::__private::de::borrow_cow_str;
 
 // Naming conventions:                  https://doc.rust-lang.org/1.0.0/style/style/naming/README.html
 // Inheritance (traits):                https://riptutorial.com/rust/example/22917/inheritance-with-traits
@@ -481,8 +481,8 @@ fn draw_annotations(view:&View, dist_map:&Vec<u16>, outlines:&Vec<u8>)
     let local_earth_radius = ref_point.norm();
     let fake_earth_radius = local_earth_radius * view.refraction_coef;
 
-    //let p_ref =view.earth_model.lle_to_xyz(&view.eye);
     // TODO: prepare drawing canvas
+    // TODO: find font/line drawing library (https://github.com/mooman219/fontdue?)
     println!("Loading summit database");    
     let mut reader = csv::ReaderBuilder::new().delimiter(b'\t').from_path("data-cz-prom100.tsv").unwrap();
     type RecordType = (String, f64, f64, f64);
