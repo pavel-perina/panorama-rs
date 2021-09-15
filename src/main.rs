@@ -8,6 +8,7 @@ use std::sync::{Arc,
 
 use rayon::prelude::*;
 use csv::{self};
+use serde::__private::de::borrow_cow_str;
 
 // Naming conventions:                  https://doc.rust-lang.org/1.0.0/style/style/naming/README.html
 // Inheritance (traits):                https://riptutorial.com/rust/example/22917/inheritance-with-traits
@@ -105,8 +106,24 @@ impl EarthModel for Sphere {
     }
 
     fn distance(&self, p1:&PositionLLE, p2:&PositionLLE) -> f64 {
-        assert!(false, "Not implemented");
-        f64::INFINITY
+        // Haversine formula
+        /* 
+        let phi1     = p1.lat.to_radians();
+        let phi2     = p2.lat.to_radians();
+        let d_phi_2_sin    = ((phi2 - phi1)/2.0).sin();
+        let d_lambda_2_sin = ((p2.lon - p1.lon).to_radians()/2.0).sin();
+        let a = d_phi_2_sin*d_phi_2_sin  +  phi1.cos()*phi2.cos() * d_lambda_2_sin*d_lambda_2_sin;
+        let c = 2.0 * a.sqrt().atan2( (1.0-a).sqrt() );
+        return self.r * c;
+        */
+        let lat1 = p1.lat.to_radians();
+        let lat2 = p2.lat.to_radians();
+        let lon1 = p1.lon.to_radians();
+        let lon2 = p2.lon.to_radians();
+        let sin_diff_lat_2 = ((lat2-lat1)*0.5).sin();
+        let sin_diff_lon_2 = ((lon2-lon1)*0.5).sin();
+        let temp:f64 = sin_diff_lat_2*sin_diff_lat_2 + lat1.cos()*lat2.cos()*sin_diff_lon_2*sin_diff_lon_2; 
+        return 2.0 * temp.sqrt().asin() * self.r;
     }
 }
 
@@ -306,13 +323,18 @@ impl View {
                                                    |_| 
 ******************************************************************/
 
+fn elevation_drop_at_distance(distance:f64, radius:f64) -> f64 {
+     (radius*radius-distance*distance).sqrt()-radius
+}
+
 fn precompute_earth_curve(radius: f64, dist_max: f64, dist_step:f64) -> Vec<f64> {
     let n_steps = (dist_max / dist_step) as usize + 1;
-    return (0..n_steps).map(|x|{
-        let fx = (x as f64) * dist_step;
-        return (radius*radius-fx*fx).sqrt() - radius;
+    return (0..n_steps).map(|step|{
+        elevation_drop_at_distance((step as f64) * dist_step, radius)
     }).collect();
 }
+
+
 
 
 fn make_dist_map(view:&View, range:&LatLonRange, height_map:&Vec<u16>) -> Vec<u16> {
@@ -384,6 +406,36 @@ fn extract_outlines(view:&View, dist_map:&Vec<u16>) -> Vec<u8> {
 }
 
 
+fn test_pixel(view:&View, dist_map:&Vec<u16>, x:usize, y:usize, radius:usize, value:u16, tolerance:u16) -> bool {
+    if x < (radius+1) || y < (radius+1) || (x+radius)>view.out_width || (y+radius)>view.out_height {
+        return false;
+    }
+    for row in (y-radius)..(y+radius) {
+        for col in (x-radius)..(x+radius) {
+            let mapValue = dist_map[row * view.out_width + col];
+            if mapValue >= value {
+                if (mapValue - value) <= tolerance {
+                    return true
+                }
+            }
+            else if (value - mapValue) <= tolerance {
+                return true
+            }
+        }
+    }
+    return false;
+}
+
+
+/******************************************************************
+ _   _ _ _ _ 
+| | | (_) | |
+| |_| | | | |
+|  _  | | | |
+|_| |_|_|_|_|
+******************************************************************/
+
+
 struct Hill {
     name:String,
     lle:PositionLLE
@@ -404,30 +456,60 @@ trait IntoHill {
 
 impl IntoHill for (std::string::String, f64, f64, f64) {
     fn into(self) -> Hill {
-        return Hill{name:self.0.clone(), lle:PositionLLE{lat:self.1, lon:self.2, ele:self.3}};
+        assert!(self.2 <= 360.0);
+        assert!(self.3 <= 360.0);
+        return Hill{name:self.0.clone(), lle:PositionLLE{lat:self.2, lon:self.3, ele:self.1}};
     }
 }
 
 
+/******************************************************************
+    _                      _        _   _
+   / \   _ __  _ __   ___ | |_ __ _| |_(_) ___  _ __  ___
+  / _ \ | '_ \| '_ \ / _ \| __/ _` | __| |/ _ \| '_ \/ __|
+ / ___ \| | | | | | | (_) | || (_| | |_| | (_) | | | \__ \
+/_/   \_\_| |_|_| |_|\___/ \__\__,_|\__|_|\___/|_| |_|___/
+******************************************************************/
+
+
 fn draw_annotations(view:&View, dist_map:&Vec<u16>, outlines:&Vec<u8>)
 {
-    let p_ref =view.earth_model.lle_to_xyz(&view.eye);
+    use nalgebra::vector;
+
+    let eye_xyz = view.earth_model.lle_to_xyz(&view.eye);
+    let ref_point = vector![eye_xyz.x, eye_xyz.y, eye_xyz.z];
+    let local_earth_radius = ref_point.norm();
+    let fake_earth_radius = local_earth_radius * view.refraction_coef;
+
+    //let p_ref =view.earth_model.lle_to_xyz(&view.eye);
     // TODO: prepare drawing canvas
     println!("Loading summit database");    
-    let mut reader = csv::ReaderBuilder::new().delimiter(b'\t').from_path("osm-cz-sk.tsv").unwrap();
+    let mut reader = csv::ReaderBuilder::new().delimiter(b'\t').from_path("data-cz-prom100.tsv").unwrap();
     type RecordType = (String, f64, f64, f64);
     for wrapped_record in reader.deserialize() {
         let record: RecordType = wrapped_record.unwrap();
         let hill = Hill::new(record);
-        let dist = view.earth_model.distance(&view.eye, &hill.lle);
-        if dist > view.dist_max_m {
+        let distance_m = view.earth_model.distance(&view.eye, &hill.lle);
+        if distance_m > view.dist_max_m {
+            //println!("Hill {} rejected due to distance {:6.2} km", hill.name, distance_m*1.0e-3);
             continue;
         }
         let azimuth_r = view.earth_model.bearing(&view.eye, &hill.lle).to_radians();
         // FIXME: weird numbers, euclidian?
         if azimuth_r < view.azimuth_min_r || azimuth_r > view.azimuth_max_r {
+            //println!("Hill {} rejected due to azimuth {:6.2}", hill.name, azimuth_r.to_degrees());
             continue;
         }
+        let h = hill.lle.ele + elevation_drop_at_distance(distance_m, fake_earth_radius) - view.eye.ele;
+        let elevation_r = h.atan2(distance_m); // FIXME: 
+        let test_x:usize = ((azimuth_r - view.azimuth_min_r) / view.angular_step_r).round() as usize;
+        let test_y:usize = ((view.elevation_max_r - elevation_r) / view.angular_step_r).round() as usize;
+        let is_visible = test_pixel(view, dist_map, test_x, test_y, 4, (distance_m/view.dist_step_m) as u16, 5);
+        if is_visible == false {
+            //println!("Hill {} is not visible", hill.name);
+            continue;
+        }
+        println!("{:>20} is visible at azimuth {:6.2} deg and distance {:6.2} km", hill.name, azimuth_r.to_degrees(), distance_m * 1.0e-3);
     }
     // TODO: draw azimuth ticks, horizon
 }
