@@ -1,13 +1,13 @@
 extern crate byteorder;
 extern crate lodepng;
 extern crate nalgebra;
-
-use std::sync::{Arc,
-                atomic::{AtomicU16,
-                         Ordering::Relaxed}};
+extern crate conv;
+extern crate transpose;
 
 use rayon::prelude::*;
-use csv::{self};
+use conv::prelude::*;
+use csv;
+
 //use serde::__private::de::borrow_cow_str;
 
 // Naming conventions:                  https://doc.rust-lang.org/1.0.0/style/style/naming/README.html
@@ -171,7 +171,7 @@ impl LatLonRange {
         let tiles_vert:usize     = (max_lat - min_lat + 1) as usize;
         let pixels_per_deg:f64   = 1200.0;
         let data_width:usize     = tiles_horiz * 1200 + 1;
-        let data_height:usize    = tiles_vert * 1200 + 1;
+        let data_height:usize    = tiles_vert  * 1200 + 1;
         return LatLonRange{min_lat, min_lon, max_lat, max_lon, 
                            tiles_horiz, tiles_vert, 
                            data_width, data_height,
@@ -335,8 +335,6 @@ fn precompute_earth_curve(radius: f64, dist_max: f64, dist_step:f64) -> Vec<f64>
 }
 
 
-
-
 fn make_dist_map(view:&View, range:&LatLonRange, height_map:&Vec<u16>) -> Vec<u16> {
     use nalgebra::vector;
 
@@ -350,12 +348,17 @@ fn make_dist_map(view:&View, range:&LatLonRange, height_map:&Vec<u16>) -> Vec<u1
     println!("Output size is {} x {} pixels", view.out_width, view.out_height);
     println!("Output resolution is {} mrad per pixel or {} pixels per degree", view.angular_step_r * 1000.0, view.angular_step_r.to_degrees().recip() );
     
-    let mut buffer = Vec::with_capacity(view.array_size());
-    buffer.resize_with(view.array_size(), || AtomicU16::new(0));
-    let data:Arc<[AtomicU16]> = Arc::from(buffer);
+    let mut buffer: Vec<u16> = Vec::with_capacity(view.array_size());
+    unsafe { buffer.set_len(view.array_size()); }
 
-     (0..view.out_width).into_par_iter().for_each(|x| {
-        let azimuth_r = view.azimuth_min_r + (x as f64) * view.angular_step_r;
+    let chunk_size = view.out_height;
+    buffer.par_chunks_mut(chunk_size)
+          .into_par_iter()
+          .enumerate()
+          .for_each(|(x, slice)| 
+    {
+        let flt_x = f64::value_from(x).expect("Conversion expect");
+        let azimuth_r = view.azimuth_min_r + flt_x * view.angular_step_r;
         let mut elevation_r = view.elevation_min_r;
         let h0 = view.eye.ele;
         let n_dist_steps = (view.dist_max_m / view.dist_step_m) as usize + 1;
@@ -372,20 +375,23 @@ fn make_dist_map(view:&View, range:&LatLonRange, height_map:&Vec<u16>) -> Vec<u1
                 let y_bot = ((view.elevation_max_r - elevation_r)/view.angular_step_r) as usize;
                 let v = (dist / view.dist_step_m) as u16;
                 for y in y_top..=y_bot {
-                    data[y * view.out_width + x].store( v, Relaxed);
+                    unsafe {
+                        *slice.get_unchecked_mut(y) = v;
+                    }
                 }
                 elevation_r = new_elevation_r;
             }
         }
     });
 
-    let mut result = Vec::with_capacity(view.array_size());
-    unsafe { result.set_len(view.array_size()); }
-    for i in 0..view.array_size() {
-        result[i] = data[i].load(Relaxed);
-    }
+    //use std::time::Instant;
+    //let timer_start = Instant::now();
+    let mut output: Vec<u16> = Vec::with_capacity(view.array_size());
+    unsafe { output.set_len(view.array_size()); }
+    transpose::transpose(&buffer, &mut output, view.out_height, view.out_width);
+    //println!("Transpose took {} seconds", timer_start.elapsed().as_secs_f64()); 11ms
 
-    return result;
+    return output;
 }
 
 
